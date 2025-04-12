@@ -5,10 +5,11 @@ import {
   View,
   ScrollView,
   Button,
-  Dimensions,
   TouchableOpacity,
+  Animated,
+  Easing,
 } from "react-native";
-import { LineChart } from "react-native-chart-kit";
+import { AnimatedCircularProgress } from "react-native-circular-progress";
 
 type StressData = number[];
 
@@ -16,12 +17,23 @@ const App: React.FC = () => {
   const [stressData, setStressData] = useState<StressData>([]);
   const [stressLevel, setStressLevel] = useState<string>("Normal");
   const [isConnected, setIsConnected] = useState<boolean>(false);
+  const [currentStress, setCurrentStress] = useState<number>(0);
+  const [progressAnimation] = useState(new Animated.Value(0));
 
   // Simulated data generation
   useEffect(() => {
     const interval = setInterval(() => {
       const newStressValue = Math.floor(Math.random() * 100);
+      setCurrentStress(newStressValue);
       setStressData((prevData) => [...prevData.slice(-9), newStressValue]);
+
+      // Animate the progress
+      Animated.timing(progressAnimation, {
+        toValue: newStressValue,
+        duration: 1000,
+        easing: Easing.out(Easing.ease),
+        useNativeDriver: false,
+      }).start();
 
       // Classify stress levels
       if (newStressValue > 70) setStressLevel("High");
@@ -42,9 +54,20 @@ const App: React.FC = () => {
     // Add navigation logic here
   };
 
+  const getStressColor = (level: string) => {
+    switch (level) {
+      case "High":
+        return "#ff5252";
+      case "Moderate":
+        return "#ffa726";
+      default:
+        return "#4caf50";
+    }
+  };
+
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>IoT-Based Stress Monitor</Text>
+      <Text style={styles.title}>CalmPulse-Smart Stress Tracker and Guide</Text>
 
       <View style={styles.buttonContainer}>
         <Button
@@ -61,39 +84,24 @@ const App: React.FC = () => {
 
       <View style={styles.dashboard}>
         <Text style={styles.stressLevel}>Stress Level: {stressLevel}</Text>
-        <LineChart
-          data={{
-            labels: [
-              "T-9",
-              "T-8",
-              "T-7",
-              "T-6",
-              "T-5",
-              "T-4",
-              "T-3",
-              "T-2",
-              "Now",
-            ],
-            datasets: [
-              {
-                data: stressData.length
-                  ? stressData
-                  : [0, 0, 0, 0, 0, 0, 0, 0, 0],
-              },
-            ],
-          }}
-          width={Dimensions.get("window").width - 40}
-          height={220}
-          chartConfig={{
-            backgroundColor: "#1E2923",
-            backgroundGradientFrom: "#08130D",
-            backgroundGradientTo: "#1E2923",
-            decimalPlaces: 0,
-            color: (opacity = 1) => `rgba(26, 255, 146, ${opacity})`,
-            labelColor: (opacity = 1) => `rgba(255, 255, 255, ${opacity})`,
-          }}
-          style={styles.chart}
-        />
+        <View style={styles.progressContainer}>
+          <AnimatedCircularProgress
+            size={200}
+            width={20}
+            fill={currentStress}
+            tintColor={getStressColor(stressLevel)}
+            backgroundColor="#e0e0e0"
+            rotation={0}
+            lineCap="round"
+          >
+            {(fill) => (
+              <View style={styles.progressContent}>
+                <Text style={styles.percentText}>{`${Math.round(fill)}%`}</Text>
+                <Text style={styles.stressLabel}>Stress Level</Text>
+              </View>
+            )}
+          </AnimatedCircularProgress>
+        </View>
       </View>
 
       {stressLevel === "High" && (
@@ -138,14 +146,24 @@ const styles = StyleSheet.create({
   },
   dashboard: {
     width: "100%",
-    padding: 10,
-    borderRadius: 10,
+    padding: 20,
+    borderRadius: 20,
     backgroundColor: "#fff",
     shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     elevation: 3,
     marginBottom: 20,
+    alignItems: "center",
+  },
+  progressContainer: {
+    alignItems: "center",
+    justifyContent: "center",
+    marginVertical: 20,
+  },
+  progressContent: {
+    alignItems: "center",
+    justifyContent: "center",
   },
   stressLevel: {
     fontSize: 20,
@@ -153,9 +171,15 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     textAlign: "center",
   },
-  chart: {
-    marginVertical: 10,
-    borderRadius: 16,
+  percentText: {
+    fontSize: 36,
+    fontWeight: "bold",
+    color: "#333",
+  },
+  stressLabel: {
+    fontSize: 14,
+    color: "#666",
+    marginTop: 5,
   },
   suggestion: {
     fontSize: 16,
