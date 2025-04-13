@@ -47,6 +47,7 @@ const App: React.FC = () => {
   const [stressData, setStressData] = useState<StressData>([]);
   const [stressLevel, setStressLevel] = useState<string>("Normal");
   const [isConnected, setIsConnected] = useState<boolean>(false);
+  const [isMonitoring, setIsMonitoring] = useState<boolean>(false);
   const [currentStress, setCurrentStress] = useState<number>(0);
   const [bodyTemperature, setBodyTemperature] = useState<number>(36.5);
   const [hrvValue, setHrvValue] = useState<number>(50);
@@ -54,9 +55,15 @@ const App: React.FC = () => {
   const [tempAnimation] = useState(new Animated.Value(36.5));
   const [hrvAnimation] = useState(new Animated.Value(50));
   const [selectedMetric, setSelectedMetric] = useState<string | null>(null);
+  const [monitoringInterval, setMonitoringInterval] = useState<NodeJS.Timeout | null>(null);
 
-  // Simulated data generation
-  useEffect(() => {
+  // Modified data generation with start/stop functionality
+  const startMonitoring = () => {
+    if (!isConnected) {
+      alert("Please connect to device first");
+      return;
+    }
+
     const interval = setInterval(() => {
       const newStressValue = Math.floor(Math.random() * 100);
       const newTempValue = 36 + Math.random() * 1.5;
@@ -95,8 +102,26 @@ const App: React.FC = () => {
       else setStressLevel("Normal");
     }, 2000);
 
-    return () => clearInterval(interval);
-  }, []);
+    setMonitoringInterval(interval);
+    setIsMonitoring(true);
+  };
+
+  const stopMonitoring = () => {
+    if (monitoringInterval) {
+      clearInterval(monitoringInterval);
+      setMonitoringInterval(null);
+    }
+    setIsMonitoring(false);
+  };
+
+  // Clear interval on component unmount
+  useEffect(() => {
+    return () => {
+      if (monitoringInterval) {
+        clearInterval(monitoringInterval);
+      }
+    };
+  }, [monitoringInterval]);
 
   const connectToDevice = () => {
     setIsConnected(true);
@@ -366,6 +391,28 @@ const App: React.FC = () => {
 
       <View style={styles.dashboard}>
         <Text style={styles.stressLevel}>Stress Level: {stressLevel}</Text>
+        
+        <View style={styles.monitoringControls}>
+          <TouchableOpacity
+            style={[
+              styles.monitoringButton,
+              { backgroundColor: isMonitoring ? '#666' : '#4caf50' }
+            ]}
+            onPress={isMonitoring ? stopMonitoring : startMonitoring}
+            disabled={!isConnected}
+          >
+            <FontAwesome6 
+              name={isMonitoring ? "stop" : "play"} 
+              size={16} 
+              color="#fff" 
+              style={styles.monitoringIcon}
+            />
+            <Text style={styles.monitoringButtonText}>
+              {isMonitoring ? "Stop Monitoring" : "Start Monitoring"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
         <TouchableOpacity 
           onPress={() => setSelectedMetric('stress')}
           style={styles.progressContainer}
@@ -764,6 +811,33 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#666',
     lineHeight: 24,
+  },
+  monitoringControls: {
+    width: '100%',
+    alignItems: 'center',
+    marginBottom: 15,
+  },
+  monitoringButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 25,
+    backgroundColor: '#4caf50',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    elevation: 2,
+  },
+  monitoringButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginLeft: 8,
+  },
+  monitoringIcon: {
+    marginRight: 5,
   },
 });
 
