@@ -9,6 +9,7 @@ import {
   Animated,
   Easing,
   Modal,
+  ImageBackground,
 } from "react-native";
 import { AnimatedCircularProgress } from "react-native-circular-progress";
 import FontAwesome6 from "@expo/vector-icons/FontAwesome6";
@@ -64,26 +65,33 @@ const App: React.FC = () => {
   const [progressAnimation] = useState(new Animated.Value(0));
   const [tempAnimation] = useState(new Animated.Value(36.5));
   const [hrvAnimation] = useState(new Animated.Value(50));
-  const [showAnalysis, setShowAnalysis] = useState<boolean>(false);
-  const [monitoringInterval, setMonitoringInterval] =
-    useState<NodeJS.Timeout | null>(null);
+  const [selectedMetric, setSelectedMetric] = useState<string | null>(null);
+  const [monitoringInterval, setMonitoringInterval] = useState<NodeJS.Timeout | null>(null);
 
+  // Modified data generation with start/stop functionality
   const startMonitoring = () => {
     if (!isConnected) {
-      alert("Please connect to device first");
+      alert("Please connect to ESP32 first");
       return;
     }
 
-    const interval = setInterval(() => {
-      const newStressValue = Math.floor(Math.random() * 100);
-      const newTempValue = 36 + Math.random() * 1.5;
-      const newHrvValue = 20 + Math.floor(Math.random() * 180);
+    const interval = setInterval(async () => {
+      try {
+        // Fetch temperature from ESP32
+        const response = await fetch(`http://${esp32IP}/temperature`);
+        const tempData = await response.text();
+        const newTempValue = parseFloat(tempData);
 
-      setCurrentStress(newStressValue);
-      setBodyTemperature(newTempValue);
-      setHrvValue(newHrvValue);
-      setStressData((prevData) => [...prevData.slice(-9), newStressValue]);
+        // Generate mock data for stress and HRV (since ESP32 only provides temperature)
+        const newStressValue = Math.floor(Math.random() * 100);
+        const newHrvValue = 20 + Math.floor(Math.random() * 180);
 
+        setCurrentStress(newStressValue);
+        setBodyTemperature(newTempValue);
+        setHrvValue(newHrvValue);
+        setStressData((prevData) => [...prevData.slice(-9), newStressValue]);
+
+      // Animate the progress
       Animated.parallel([
         Animated.timing(progressAnimation, {
           toValue: newStressValue,
@@ -104,6 +112,11 @@ const App: React.FC = () => {
           useNativeDriver: false,
         }),
       ]).start();
+
+      // Classify stress levels
+      if (newStressValue > 70) setStressLevel("High");
+      else if (newStressValue > 40) setStressLevel("Moderate");
+      else setStressLevel("Normal");
     }, 2000);
 
     setMonitoringInterval(interval);
@@ -124,24 +137,39 @@ const App: React.FC = () => {
     };
   }, [monitoringInterval]);
 
-  const connectToDevice = () => setIsConnected(true);
+  const connectToDevice = () => {
+    setIsConnected(true);
+    console.log("Connected to Device");
+  };
 
-  const calculateOverallStress = (): number => {
-    const stressScore = currentStress;
+  const openRelaxationHub = () => {
+    console.log("Navigate to Relaxation Hub");
+    // Add navigation logic here
+  };
 
-    let tempScore = 0;
-    if (bodyTemperature < 36.0) {
-      tempScore = ((36.0 - bodyTemperature) / 2.0) * 100;
-    } else if (bodyTemperature > 37.5) {
-      tempScore = ((bodyTemperature - 37.5) / 2.5) * 100;
+  const getStressColor = (level: string) => {
+    switch (level) {
+      case "High":
+        return "#ff5252";
+      case "Moderate":
+        return "#ffa726";
+      default:
+        return "#4caf50";
     }
-    tempScore = Math.min(100, tempScore);
+  };
 
-    let hrvScore = 0;
-    if (hrvValue < 30) hrvScore = ((30 - hrvValue) / 30) * 100;
-    hrvScore = Math.min(100, hrvScore);
-
-    return stressScore * 0.6 + tempScore * 0.2 + hrvScore * 0.2;
+  const getTempColor = (temp: number) => {
+    if (temp > 37.5) return "#ff5252";      // Red for high temperature
+    if (temp < 36.0) return "#2196f3";      // Blue for low temperature
+    if (temp >= 36.0 && temp <= 37.5) {     // Green to Yellow gradient for normal range
+      const normalizedTemp = (temp - 36.0) / (37.5 - 36.0);  // 0 to 1
+      if (normalizedTemp <= 0.5) {
+        return "#4caf50";  // Green for lower normal
+      } else {
+        return "#ffa726";  // Orange for higher normal
+      }
+    }
+    return "#4caf50";  // Default green
   };
 
   const getStressColor = (value: number) => {
@@ -150,46 +178,138 @@ const App: React.FC = () => {
     return "#4caf50";
   };
 
-  const getAnalysis = () => {
-    const overallStress = calculateOverallStress();
-    const stressStatus =
-      overallStress > 70 ? "High" : overallStress > 40 ? "Moderate" : "Normal";
+  const getHrvPercentage = (hrv: number) => {
+    return Math.min(100, Math.max(0, ((hrv - 20) / (200 - 20)) * 100));
+  };
 
-    return {
-      title: "Comprehensive Stress Analysis",
-      status: stressStatus,
-      details: `Based on your current biometric readings:
-- Stress Level: ${currentStress}%
-- Body Temperature: ${bodyTemperature.toFixed(1)}°C
-- HRV: ${hrvValue}ms
+  const getStressExercises = (stressLevel: number) => {
+    if (stressLevel >= 100) {
+      return "• Sprinting (10–30 seconds)\n• Clap Push-Ups\n• Hill Sprints";
+    } else if (stressLevel >= 90) {
+      return "• Deadlifts (90% of 1-rep max)\n• Squats (90% 1RM)\n• Dumbbell Snatch";
+    } else if (stressLevel >= 80) {
+      return "• Running (400m repeats)\n• Push-Ups (fast tempo)\n• Cycling Sprints (30s on/30s off)";
+    } else if (stressLevel >= 70) {
+      return "• Jogging (5K pace)\n• Bodyweight Squats (15–20 reps)\n• Moderate Cycling (hill climbs)";
+    } else if (stressLevel >= 60) {
+      return "• Brisk Walking (power walk)\n• Swimming (leisurely laps)\n• Yoga Flow (vinyasa)";
+    } else if (stressLevel >= 50) {
+      return "• Walking (casual pace)\n• Wall Push-Ups\n• Standing Hip Circles";
+    } else if (stressLevel >= 40) {
+      return "• Leisurely Walking (park stroll)\n• Slow Yoga (yin or restorative)\n• Deep Breathing Drills";
+    } else if (stressLevel >= 30) {
+      return "• Chair Yoga\n• Static Stretching (hamstrings, quads)\n• Body Scans (mindfulness + stretching)";
+    } else if (stressLevel >= 20) {
+      return "• Slow Walking (indoor pacing)\n• Mindful Breathing (diaphragmatic breaths)\n• Gentle Eye Exercises";
+    } else {
+      return "• Deep Breathing (4-7-8 technique)\n• Meditation (guided or silent)\n• Progressive Muscle Relaxation";
+    }
+  };
 
-Composite Stress Score: ${overallStress.toFixed(1)}%`,
-      recommendations:
-        overallStress > 70
-          ? [
-              "• Immediate breathing exercises",
-              "• Cool environment relaxation",
-              "• Guided meditation session",
-              "• Hydration check",
-            ]
-          : overallStress > 40
-          ? [
-              "• Progressive muscle relaxation",
-              "• Light physical activity",
-              "• Mindfulness practice",
-              "• Hydration and nutrition check",
-            ]
-          : [
-              "• Maintain healthy routines",
-              "• Light exercise",
-              "• Regular mindfulness practice",
-            ],
-      metrics: {
-        stress: currentStress,
-        temp: bodyTemperature,
-        hrv: hrvValue,
-      },
-    };
+  const getTemperatureExercises = (temp: number) => {
+    if (temp >= 38.0) {
+      return "• Rest in a cool environment\n• Take lukewarm (not cold) bath\n• Use light clothing\n• Stay hydrated with cool water";
+    } else if (temp >= 37.5) {
+      return "• Light stretching exercises\n• Gentle walking in cool area\n• Deep breathing exercises\n• Stay in ventilated space";
+    } else if (temp >= 37.0) {
+      return "• Moderate walking\n• Light yoga\n• Tai chi\n• Swimming in temperature-controlled pool";
+    } else if (temp >= 36.5) {
+      return "• Regular cardio exercises\n• Jogging\n• Cycling\n• Regular workout routine";
+    } else if (temp >= 36.0) {
+      return "• Brisk walking\n• Dynamic stretching\n• Light aerobics\n• Regular activities";
+    } else if (temp >= 35.5) {
+      return "• Indoor exercises\n• Warm-up routines\n• Light cardio with proper clothing\n• Gradual intensity increase";
+    } else {
+      return "• Indoor warm-up exercises\n• Movement in warm environment\n• Gentle stretching with warm clothing\n• Hot yoga (if available)";
+    }
+  };
+
+  const getAnalysisText = (metric: string) => {
+    switch (metric) {
+      case 'stress':
+        return {
+          title: 'Stress Analysis',
+          status: stressLevel,
+          details: currentStress > 70 
+            ? "Your stress level is high. Consider taking a break and practicing relaxation techniques."
+            : currentStress > 40
+            ? "Your stress level is moderate. Try some deep breathing exercises."
+            : "Your stress level is normal. Keep up the good work!",
+          recommendation: currentStress > 40 
+            ? "• Practice deep breathing\n• Take a short walk\n• Listen to calming music\n• Try meditation"
+            : "• Maintain your current routine\n• Regular exercise\n• Good sleep habits",
+          exercises: {
+            title: "Recommended Exercises for Your Stress Level",
+            description: `Based on your current stress level (${currentStress}%), here are some targeted exercises:`,
+            list: getStressExercises(currentStress)
+          }
+        };
+      case 'temperature':
+        return {
+          title: 'Body Temperature Analysis',
+          status: bodyTemperature > 37.5 
+            ? "High"
+            : bodyTemperature < 36 
+            ? "Low" 
+            : "Normal",
+          details: bodyTemperature > 37.5
+            ? "Your body temperature is above normal range. Monitor for other symptoms."
+            : bodyTemperature < 36
+            ? "Your body temperature is below normal range. Try to warm up."
+            : "Your body temperature is within the normal range.",
+          recommendation: bodyTemperature > 37.5
+            ? "• Rest and hydrate\n• Monitor for other symptoms\n• Consult a doctor if persistent"
+            : bodyTemperature < 36
+            ? "• Warm up gradually\n• Wear warm clothing\n• Have warm beverages"
+            : "• Maintain normal activities\n• Stay hydrated",
+          tempInfo: {
+            title: "Temperature Information",
+            currentTemp: `Current Temperature: ${bodyTemperature.toFixed(1)}°C`,
+            normalRange: "Normal body temperature range: 36.0°C - 37.5°C",
+            interpretation: bodyTemperature > 37.5
+              ? "Elevated temperature may indicate fever or overexertion"
+              : bodyTemperature < 36
+              ? "Low temperature may indicate cold exposure or reduced circulation"
+              : "Your temperature is within healthy range",
+          },
+          exercises: {
+            title: "Recommended Activities for Your Temperature",
+            description: `Based on your current temperature (${bodyTemperature.toFixed(1)}°C), here are some suggested activities:`,
+            list: getTemperatureExercises(bodyTemperature)
+          }
+        };
+      case 'hrv':
+        return {
+          title: 'Heart Rate Variability Analysis',
+          status: hrvValue < 30 
+            ? "Low"
+            : hrvValue > 150 
+            ? "High" 
+            : "Normal",
+          details: hrvValue < 30
+            ? "Your HRV is low, which might indicate stress or fatigue. Consider taking time to rest and recover."
+            : hrvValue > 150
+            ? "Your HRV is high, indicating good cardiovascular fitness and stress resilience."
+            : "Your HRV is within a normal range, indicating good balance between stress and recovery.",
+          recommendation: hrvValue < 30
+            ? "• Prioritize rest and recovery\n• Practice stress management\n• Improve sleep quality\n• Consider reducing training intensity"
+            : hrvValue > 150
+            ? "• Maintain current lifestyle habits\n• Continue balanced exercise routine\n• Keep up good sleep patterns"
+            : "• Maintain regular exercise\n• Practice stress management\n• Ensure adequate sleep",
+          hrvInfo: {
+            title: "Understanding Your HRV",
+            description: "Heart Rate Variability (HRV) measures the variation in time between heartbeats. Higher HRV generally indicates better cardiovascular fitness and stress resilience.",
+            currentValue: `Current HRV: ${hrvValue}ms`,
+            interpretation: hrvValue < 30
+              ? "Low HRV may indicate stress, poor recovery, or overtraining"
+              : hrvValue > 150
+              ? "High HRV suggests excellent cardiovascular health and stress resilience"
+              : "Your HRV indicates a good balance between stress and recovery"
+          }
+        };
+      default:
+        return null;
+    }
   };
 
   const AnalysisModal = () => {
@@ -206,8 +326,8 @@ Composite Stress Score: ${overallStress.toFixed(1)}%`,
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{analysis.title}</Text>
-              <TouchableOpacity
-                onPress={() => setShowAnalysis(false)}
+              <TouchableOpacity 
+                onPress={() => setSelectedMetric(null)}
                 style={styles.closeButton}
               >
                 <FontAwesome6 name="xmark" size={24} color="#333" />
@@ -226,63 +346,38 @@ Composite Stress Score: ${overallStress.toFixed(1)}%`,
                 </Text>
 
                 <Text style={styles.detailsText}>{analysis.details}</Text>
+                
+                <Text style={styles.recommendationTitle}>General Recommendations:</Text>
+                <Text style={styles.recommendationText}>{analysis.recommendation}</Text>
 
-                <View style={styles.metricsSummary}>
-                  <View style={styles.metricSummaryItem}>
-                    <Text style={styles.metricSummaryValue}>
-                      {analysis.metrics.stress}%
-                    </Text>
-                    <Text style={styles.metricSummaryLabel}>Stress</Text>
+                {analysis.tempInfo && (
+                  <View style={styles.tempInfoSection}>
+                    <Text style={styles.tempInfoTitle}>{analysis.tempInfo.title}</Text>
+                    <Text style={[styles.tempInfoValue, { 
+                      color: getTempColor(bodyTemperature),
+                      fontSize: 24,
+                      fontWeight: 'bold',
+                      marginVertical: 10,
+                    }]}>{analysis.tempInfo.currentTemp}</Text>
+                    <Text style={styles.tempInfoRange}>{analysis.tempInfo.normalRange}</Text>
+                    <Text style={styles.tempInfoInterpretation}>{analysis.tempInfo.interpretation}</Text>
                   </View>
-                  <View style={styles.metricSummaryItem}>
-                    <Text
-                      style={[
-                        styles.metricSummaryValue,
-                        {
-                          color:
-                            bodyTemperature > 37.5
-                              ? "#ff5252"
-                              : bodyTemperature < 36
-                              ? "#2196f3"
-                              : "#4caf50",
-                        },
-                      ]}
-                    >
-                      {analysis.metrics.temp.toFixed(1)}°C
-                    </Text>
-                    <Text style={styles.metricSummaryLabel}>Temperature</Text>
-                  </View>
-                  <View style={styles.metricSummaryItem}>
-                    <Text
-                      style={[
-                        styles.metricSummaryValue,
-                        {
-                          color:
-                            hrvValue < 30
-                              ? "#ff5252"
-                              : hrvValue > 150
-                              ? "#2196f3"
-                              : "#4caf50",
-                        },
-                      ]}
-                    >
-                      {analysis.metrics.hrv}ms
-                    </Text>
-                    <Text style={styles.metricSummaryLabel}>HRV</Text>
+                )}
+
+                {analysis.exercises && (
+                  <View style={styles.exercisesSection}>
+                    <Text style={styles.exercisesTitle}>{analysis.exercises.title}</Text>
+                    <Text style={styles.exercisesDescription}>{analysis.exercises.description}</Text>
+                    <Text style={styles.exercisesList}>{analysis.exercises.list}</Text>
                   </View>
                 </View>
 
-                <Text style={styles.recommendationTitle}>
-                  Recommended Actions:
-                </Text>
-                {analysis.recommendations.map((rec, index) => (
-                  <View key={index} style={styles.recommendationItem}>
-                    <FontAwesome6
-                      name="circle-check"
-                      size={16}
-                      color="#4caf50"
-                    />
-                    <Text style={styles.recommendationText}>{rec}</Text>
+                {analysis.hrvInfo && (
+                  <View style={styles.hrvInfoSection}>
+                    <Text style={styles.hrvInfoTitle}>{analysis.hrvInfo.title}</Text>
+                    <Text style={styles.hrvInfoDescription}>{analysis.hrvInfo.description}</Text>
+                    <Text style={styles.hrvInfoCurrentValue}>{analysis.hrvInfo.currentValue}</Text>
+                    <Text style={styles.hrvInfoInterpretation}>{analysis.hrvInfo.interpretation}</Text>
                   </View>
                 ))}
               </View>
@@ -293,6 +388,43 @@ Composite Stress Score: ${overallStress.toFixed(1)}%`,
     );
   };
 
+  // Render IP input modal
+  const renderIPInputModal = () => (
+    <Modal
+      animationType="slide"
+      transparent={true}
+      visible={showIPInput}
+      onRequestClose={() => setShowIPInput(false)}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Connect to ESP32</Text>
+            <TouchableOpacity
+              onPress={() => setShowIPInput(false)}
+              style={styles.closeButton}
+            >
+              <FontAwesome6 name="xmark" size={24} color="#333" />
+            </TouchableOpacity>
+          </View>
+
+          <TextInput
+            style={styles.ipInput}
+            placeholder="Enter ESP32 IP address"
+            onSubmitEditing={(e) => connectToESP32(e.nativeEvent.text)}
+            keyboardType="numeric"
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+
+          <Text style={styles.ipInstructions}>
+            Enter the IP address shown in your ESP32's Serial Monitor
+          </Text>
+        </View>
+      </View>
+    </Modal>
+  );
+
   if (!isStarted) return <StartScreen onStart={() => setIsStarted(true)} />;
 
   return (
@@ -301,13 +433,15 @@ Composite Stress Score: ${overallStress.toFixed(1)}%`,
 
       <View style={styles.buttonContainer}>
         <Button
-          title={isConnected ? "Connected" : "Connect Device"}
+          title={isConnected ? "Connected" : "Connect to Device"}
           onPress={connectToDevice}
           color="#4caf50"
         />
       </View>
 
       <View style={styles.dashboard}>
+        <Text style={styles.stressLevel}>Stress Level: {stressLevel}</Text>
+        
         <View style={styles.monitoringControls}>
           <TouchableOpacity
             style={[
@@ -329,8 +463,8 @@ Composite Stress Score: ${overallStress.toFixed(1)}%`,
           </TouchableOpacity>
         </View>
 
-        <TouchableOpacity
-          onPress={() => setShowAnalysis(true)}
+        <TouchableOpacity 
+          onPress={() => setSelectedMetric('stress')}
           style={styles.progressContainer}
         >
           <AnimatedCircularProgress
@@ -352,7 +486,10 @@ Composite Stress Score: ${overallStress.toFixed(1)}%`,
         </TouchableOpacity>
 
         <View style={styles.metricsContainer}>
-          <View style={styles.metricItem}>
+          <TouchableOpacity 
+            style={styles.metricItem}
+            onPress={() => setSelectedMetric('temperature')}
+          >
             <AnimatedCircularProgress
               size={100}
               width={10}
@@ -364,12 +501,17 @@ Composite Stress Score: ${overallStress.toFixed(1)}%`,
             >
               {(fill) => (
                 <View style={styles.smallProgressContent}>
-                  <Text style={styles.smallPercentText}>
-                    {`${bodyTemperature.toFixed(1)}°C`}
-                  </Text>
-                  <FontAwesome6
-                    name="temperature-three-quarters"
-                    size={24}
+                  <Text style={[
+                    styles.smallPercentText,
+                    {
+                      fontSize: bodyTemperature > 37.5 ? 24 :
+                               bodyTemperature < 36.0 ? 14 : 18,
+                      fontWeight: 'bold',
+                    }
+                  ]}>{`${bodyTemperature.toFixed(1)}°C`}</Text>
+                  <FontAwesome6 
+                    name="temperature-three-quarters" 
+                    size={24} 
                     color="#4caf50"
                     style={styles.iconStyle}
                   />
@@ -378,7 +520,10 @@ Composite Stress Score: ${overallStress.toFixed(1)}%`,
             </AnimatedCircularProgress>
           </View>
 
-          <View style={styles.metricItem}>
+          <TouchableOpacity 
+            style={styles.metricItem}
+            onPress={() => setSelectedMetric('hrv')}
+          >
             <AnimatedCircularProgress
               size={100}
               width={10}
@@ -391,10 +536,10 @@ Composite Stress Score: ${overallStress.toFixed(1)}%`,
               {(fill) => (
                 <View style={styles.smallProgressContent}>
                   <Text style={styles.smallPercentText}>{`${hrvValue}ms`}</Text>
-                  <FontAwesome6
-                    name="heart-pulse"
-                    size={24}
-                    color="#4caf50"
+                  <FontAwesome6 
+                    name="heart-pulse" 
+                    size={24} 
+                    color={getHrvColor(hrvValue)} 
                     style={styles.iconStyle}
                   />
                 </View>
@@ -404,7 +549,7 @@ Composite Stress Score: ${overallStress.toFixed(1)}%`,
         </View>
       </View>
 
-      <AnalysisModal />
+      {renderAnalysisModal()}
     </ScrollView>
   );
 };
@@ -476,8 +621,16 @@ const styles = StyleSheet.create({
   smallPercentText: {
     fontWeight: "bold",
     color: "#333",
-    textAlign: "center",
-    fontSize: 16,
+    textAlign: 'center',
+  },
+  smallLabel: {
+    fontSize: 12,
+    color: "#666",
+    marginTop: 2,
+  },
+  symbolText: {
+    fontSize: 20,
+    marginTop: 2,
   },
   iconStyle: {
     marginTop: 8,
@@ -503,10 +656,9 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   modalTitle: {
-    fontSize: 20,
-    fontWeight: "bold",
-    color: "#333",
-    flex: 1,
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#333',
   },
   closeButton: {
     padding: 5,
@@ -528,42 +680,67 @@ const styles = StyleSheet.create({
   },
   recommendationTitle: {
     fontSize: 18,
-    fontWeight: "bold",
-    color: "#333",
-    marginBottom: 10,
-  },
-  recommendationItem: {
-    flexDirection: "row",
-    alignItems: "center",
+    fontWeight: 'bold',
+    color: '#333',
     marginBottom: 10,
   },
   recommendationText: {
     fontSize: 16,
-    color: "#666",
-    marginLeft: 10,
-    flex: 1,
+    color: '#666',
+    lineHeight: 24,
   },
-  metricsSummary: {
-    flexDirection: "row",
-    justifyContent: "space-around",
-    marginVertical: 20,
-    padding: 10,
-    backgroundColor: "#f8f9fa",
+  analysisScrollView: {
+    maxHeight: '80%',
+  },
+  exercisesSection: {
+    marginTop: 20,
+    padding: 15,
+    backgroundColor: '#f8f9fa',
     borderRadius: 10,
   },
-  metricSummaryItem: {
-    alignItems: "center",
-    padding: 10,
-  },
-  metricSummaryValue: {
+  exercisesTitle: {
     fontSize: 18,
-    fontWeight: "bold",
-    color: "#333",
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 10,
   },
-  metricSummaryLabel: {
-    fontSize: 14,
-    color: "#666",
-    marginTop: 5,
+  exercisesDescription: {
+    fontSize: 16,
+    color: '#666',
+    marginBottom: 15,
+  },
+  exercisesList: {
+    fontSize: 16,
+    color: '#444',
+    lineHeight: 24,
+  },
+  hrvInfoSection: {
+    marginTop: 20,
+    padding: 15,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 10,
+  },
+  hrvInfoTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 10,
+  },
+  hrvInfoDescription: {
+    fontSize: 16,
+    color: '#666',
+    marginBottom: 15,
+  },
+  hrvInfoCurrentValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 10,
+  },
+  hrvInfoInterpretation: {
+    fontSize: 16,
+    color: '#666',
+    lineHeight: 24,
   },
   startContainer: {
     flex: 1,
@@ -605,6 +782,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     marginBottom: 30,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    elevation: 3,
   },
   startIcon: {
     marginBottom: 5,
@@ -623,8 +804,12 @@ const styles = StyleSheet.create({
     paddingVertical: 15,
     paddingHorizontal: 30,
     borderRadius: 30,
-    alignItems: "center",
-    justifyContent: "center",
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    elevation: 3,
   },
   startButtonText: {
     color: "#fff",
@@ -633,7 +818,32 @@ const styles = StyleSheet.create({
     marginRight: 10,
   },
   arrowIcon: {
-    marginLeft: 10,
+    marginLeft: 5,
+  },
+  tempInfoSection: {
+    marginTop: 20,
+    padding: 15,
+    backgroundColor: '#f8f9fa',
+    borderRadius: 10,
+  },
+  tempInfoTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 10,
+  },
+  tempInfoValue: {
+    textAlign: 'center',
+  },
+  tempInfoRange: {
+    fontSize: 16,
+    color: '#666',
+    marginBottom: 10,
+  },
+  tempInfoInterpretation: {
+    fontSize: 16,
+    color: '#666',
+    lineHeight: 24,
   },
   monitoringControls: {
     width: "100%",
@@ -647,6 +857,11 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 20,
     borderRadius: 25,
+    backgroundColor: '#4caf50',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    elevation: 2,
   },
   monitoringButtonText: {
     color: "#fff",
@@ -656,9 +871,6 @@ const styles = StyleSheet.create({
   },
   monitoringIcon: {
     marginRight: 5,
-  },
-  analysisScrollView: {
-    maxHeight: "80%",
   },
 });
 
