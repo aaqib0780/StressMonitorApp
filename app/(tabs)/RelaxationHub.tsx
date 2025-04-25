@@ -1,9 +1,16 @@
 import React, { useState } from "react";
-import { StyleSheet, Text, View, TouchableOpacity, Modal } from "react-native";
+import { StyleSheet, Text, View, TouchableOpacity, Modal, Image } from "react-native";
+
+const images = {
+  breathing: require("../../assets/images/BreathingExercise.jpg"),
+  meditation: require("../../assets/images/meditation.jpg"),
+  music: require("../../assets/images/playCalmingMusic.jpg")
+};
 
 const RelaxationHub: React.FC = () => {
   const [modalVisible, setModalVisible] = useState(false);
   const [selectedExercise, setSelectedExercise] = useState("");
+
 
   const openModal = (exercise: string) => {
     setSelectedExercise(exercise);
@@ -35,7 +42,6 @@ const RelaxationHub: React.FC = () => {
         <Text style={styles.cardText}>Play Calming Music</Text>
       </TouchableOpacity>
 
-      {/* Modal for showing relaxation content */}
       <Modal
         visible={modalVisible}
         animationType="slide"
@@ -45,24 +51,49 @@ const RelaxationHub: React.FC = () => {
         <View style={styles.modalContainer}>
           <View style={styles.modalContent}>
             <Text style={styles.modalTitle}>{selectedExercise}</Text>
+            
             {selectedExercise === "Breathing Exercise" && (
-              <Text style={styles.modalText}>
-                Try the 4-7-8 technique: Inhale for 4 seconds, hold for 7
-                seconds, and exhale slowly for 8 seconds.
-              </Text>
+              <>
+                <Image
+                  source={images.breathing}
+                  style={styles.modalImage}
+                  resizeMode="cover"
+                />
+                <Text style={styles.modalText}>
+                  Try the 4-7-8 technique: Inhale for 4 seconds, hold for 7
+                  seconds, and exhale slowly for 8 seconds.
+                </Text>
+              </>
             )}
+
             {selectedExercise === "Meditation Guide" && (
-              <Text style={styles.modalText}>
-                Close your eyes, focus on your breath, and try a guided
-                meditation for 5-10 minutes.
-              </Text>
+              <>
+                <Image
+                  source={images.meditation}
+                  style={styles.modalImage}
+                  resizeMode="cover"
+                />
+                <Text style={styles.modalText}>
+                  Close your eyes, focus on your breath, and try a guided
+                  meditation for 5-10 minutes.
+                </Text>
+              </>
             )}
+
             {selectedExercise === "Play Calming Music" && (
-              <Text style={styles.modalText}>
-                Listen to soothing instrumental or nature sounds to relax your
-                mind.
-              </Text>
+              <>
+                <Image
+                  source={images.music}
+                  style={styles.modalImage}
+                  resizeMode="cover"
+                />
+                <Text style={styles.modalText}>
+                  Listen to soothing instrumental or nature sounds to relax your
+                  mind.
+                </Text>
+              </>
             )}
+
             <TouchableOpacity
               style={styles.closeButton}
               onPress={() => setModalVisible(false)}
@@ -126,19 +157,29 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
     marginBottom: 10,
   },
+  modalImage: {
+    width: 200,
+    height: 200,
+    marginVertical: 15,
+    borderRadius: 10,
+  },
   modalText: {
     fontSize: 16,
     textAlign: "center",
     marginBottom: 20,
+    lineHeight: 22,
   },
   closeButton: {
     backgroundColor: "#ff5252",
     padding: 10,
     borderRadius: 5,
+    width: "100%",
+    alignItems: "center",
   },
   closeButtonText: {
     color: "#fff",
     fontWeight: "bold",
+    fontSize: 16,
   },
 });
 

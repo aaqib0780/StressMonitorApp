@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from "react";
 import {
-  StyleSheet,
   Text,
   View,
   ScrollView,
@@ -8,15 +7,60 @@ import {
   TouchableOpacity,
   Animated,
   Easing,
+  Image,
   Modal,
   ImageBackground,
+  TextInput,
+  Alert,
 } from "react-native";
 import { AnimatedCircularProgress } from "react-native-circular-progress";
 import FontAwesome6 from "@expo/vector-icons/FontAwesome6";
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { styles } from './styles';
+import { useNavigation } from '@react-navigation/native';
 
 type StressData = number[];
+type StressLevel = "High" | "Moderate" | "Normal";
 
-const StartScreen: React.FC<{ onStart: () => void }> = ({ onStart }) => {
+interface MetricAnalysis {
+  title: string;
+  value: string;
+  status: string;
+  color: string;
+  description: string;
+  recommendations: string;
+}
+
+interface AnalysisData {
+  title: string;
+  status?: string;
+  details: string | MetricAnalysis[];
+  recommendation?: string;
+}
+
+interface UserData {
+  name: string;
+  age: string;
+}
+
+interface HistoryEntry {
+  name: string;
+  timestamp: string;
+  stressLevel: number;
+}
+
+const UserInputScreen: React.FC<{ onStart: (userData: UserData) => void }> = ({ onStart }) => {
+  const [name, setName] = useState('');
+  const [age, setAge] = useState('');
+
+  const handleStart = () => {
+    if (!name.trim() || !age.trim()) {
+      Alert.alert('Error', 'Please enter both name and age');
+      return;
+    }
+    onStart({ name, age });
+  };
+
   return (
     <View style={styles.startContainer}>
       <View style={styles.startContent}>
@@ -34,13 +78,22 @@ const StartScreen: React.FC<{ onStart: () => void }> = ({ onStart }) => {
           />
         </View>
 
-        <Text style={styles.startDescription}>
-          Monitor your stress levels, heart rate variability, and body
-          temperature in real-time. Get personalized recommendations for better
-          health management.
-        </Text>
+        <Text style={styles.inputLabel}>Enter Your Details</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Your Name"
+          value={name}
+          onChangeText={setName}
+        />
+        <TextInput
+          style={styles.input}
+          placeholder="Your Age"
+          value={age}
+          onChangeText={setAge}
+          keyboardType="numeric"
+        />
 
-        <TouchableOpacity style={styles.startButton} onPress={onStart}>
+        <TouchableOpacity style={styles.startButton} onPress={handleStart}>
           <Text style={styles.startButtonText}>Start Monitoring</Text>
           <FontAwesome6
             name="arrow-right"
@@ -56,7 +109,11 @@ const StartScreen: React.FC<{ onStart: () => void }> = ({ onStart }) => {
 
 const App: React.FC = () => {
   const [isStarted, setIsStarted] = useState<boolean>(false);
+  const [userData, setUserData] = useState<UserData | null>(null);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [showHistory, setShowHistory] = useState<boolean>(false);
   const [stressData, setStressData] = useState<StressData>([]);
+  const [stressLevel, setStressLevel] = useState<StressLevel>("Normal");
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [isMonitoring, setIsMonitoring] = useState<boolean>(false);
   const [currentStress, setCurrentStress] = useState<number>(0);
@@ -66,9 +123,73 @@ const App: React.FC = () => {
   const [tempAnimation] = useState(new Animated.Value(36.5));
   const [hrvAnimation] = useState(new Animated.Value(50));
   const [selectedMetric, setSelectedMetric] = useState<string | null>(null);
-  const [monitoringInterval, setMonitoringInterval] = useState<NodeJS.Timeout | null>(null);
+  const [monitoringInterval, setMonitoringInterval] =
+    useState<NodeJS.Timeout | null>(null);
+  const [showAnalysis, setShowAnalysis] = useState<boolean>(false);
+  const [showIPInput, setShowIPInput] = useState<boolean>(false);
+  const [esp32IP, setEsp32IP] = useState<string>("");
 
-  // Modified data generation with start/stop functionality
+  useEffect(() => {
+    loadHistory();
+  }, []);
+
+  const loadHistory = async () => {
+    try {
+      const storedHistory = await AsyncStorage.getItem('stressHistory');
+      if (storedHistory) {
+        setHistory(JSON.parse(storedHistory));
+      }
+    } catch (error) {
+      console.error('Error loading history:', error);
+    }
+  };
+
+  const saveToHistory = async (stressLevel: number) => {
+    if (!userData) return;
+    
+    const newEntry: HistoryEntry = {
+      name: userData.name,
+      timestamp: new Date().toLocaleString(),
+      stressLevel,
+    };
+
+    const updatedHistory = [...history, newEntry];
+    setHistory(updatedHistory);
+
+    try {
+      await AsyncStorage.setItem('stressHistory', JSON.stringify(updatedHistory));
+    } catch (error) {
+      console.error('Error saving history:', error);
+    }
+  };
+
+  const handleStartMonitoring = (data: UserData) => {
+    setUserData(data);
+    setIsStarted(true);
+  };
+
+  // Function to connect to ESP32
+  const connectToESP32 = async (ip: string) => {
+    try {
+      const response = await fetch(`http://${ip}/temperature`);
+      if (response.ok) {
+        setEsp32IP(ip);
+        setIsConnected(true);
+        setShowIPInput(false);
+        Alert.alert("Success", "Connected to ESP32 successfully!");
+      } else {
+        throw new Error("Failed to connect");
+      }
+    } catch (error) {
+      Alert.alert(
+        "Error",
+        "Failed to connect to ESP32. Please check the IP address and try again."
+      );
+      setIsConnected(false);
+    }
+  };
+
+  // Modified startMonitoring function to fetch real ESP32 data
   const startMonitoring = () => {
     if (!isConnected) {
       alert("Please connect to ESP32 first");
@@ -83,40 +204,46 @@ const App: React.FC = () => {
         const newTempValue = parseFloat(tempData);
 
         // Generate mock data for stress and HRV (since ESP32 only provides temperature)
-        const newStressValue = Math.floor(Math.random() * 100);
+      const newStressValue = Math.floor(Math.random() * 100);
         const newHrvValue = 20 + Math.floor(Math.random() * 180);
 
-        setCurrentStress(newStressValue);
+      setCurrentStress(newStressValue);
         setBodyTemperature(newTempValue);
         setHrvValue(newHrvValue);
-        setStressData((prevData) => [...prevData.slice(-9), newStressValue]);
+      setStressData((prevData) => [...prevData.slice(-9), newStressValue]);
+        saveToHistory(newStressValue);
 
       // Animate the progress
-      Animated.parallel([
-        Animated.timing(progressAnimation, {
-          toValue: newStressValue,
-          duration: 1000,
-          easing: Easing.out(Easing.ease),
-          useNativeDriver: false,
-        }),
-        Animated.timing(tempAnimation, {
-          toValue: newTempValue,
-          duration: 1000,
-          easing: Easing.out(Easing.ease),
-          useNativeDriver: false,
-        }),
-        Animated.timing(hrvAnimation, {
-          toValue: newHrvValue,
-          duration: 1000,
-          easing: Easing.out(Easing.ease),
-          useNativeDriver: false,
-        }),
-      ]).start();
+        Animated.parallel([
+      Animated.timing(progressAnimation, {
+        toValue: newStressValue,
+        duration: 1000,
+        easing: Easing.out(Easing.ease),
+        useNativeDriver: false,
+          }),
+          Animated.timing(tempAnimation, {
+            toValue: newTempValue,
+            duration: 1000,
+            easing: Easing.out(Easing.ease),
+            useNativeDriver: false,
+          }),
+          Animated.timing(hrvAnimation, {
+            toValue: newHrvValue,
+            duration: 1000,
+            easing: Easing.out(Easing.ease),
+            useNativeDriver: false,
+          }),
+        ]).start();
 
       // Classify stress levels
       if (newStressValue > 70) setStressLevel("High");
       else if (newStressValue > 40) setStressLevel("Moderate");
       else setStressLevel("Normal");
+      } catch (error) {
+        console.error("Error fetching ESP32 data:", error);
+        Alert.alert("Error", "Failed to fetch data from ESP32");
+        stopMonitoring();
+      }
     }, 2000);
 
     setMonitoringInterval(interval);
@@ -131,51 +258,49 @@ const App: React.FC = () => {
     setIsMonitoring(false);
   };
 
+  // Clear interval on component unmount
   useEffect(() => {
     return () => {
-      if (monitoringInterval) clearInterval(monitoringInterval);
+      if (monitoringInterval) {
+        clearInterval(monitoringInterval);
+      }
     };
   }, [monitoringInterval]);
 
+  // Modified connectToDevice function
   const connectToDevice = () => {
-    setIsConnected(true);
-    console.log("Connected to Device");
+    setShowIPInput(true);
   };
-
   const openRelaxationHub = () => {
     console.log("Navigate to Relaxation Hub");
     // Add navigation logic here
   };
 
-  const getStressColor = (level: string) => {
-    switch (level) {
-      case "High":
-        return "#ff5252";
-      case "Moderate":
-        return "#ffa726";
-      default:
-        return "#4caf50";
-    }
-  };
-
-  const getTempColor = (temp: number) => {
-    if (temp > 37.5) return "#ff5252";      // Red for high temperature
-    if (temp < 36.0) return "#2196f3";      // Blue for low temperature
-    if (temp >= 36.0 && temp <= 37.5) {     // Green to Yellow gradient for normal range
-      const normalizedTemp = (temp - 36.0) / (37.5 - 36.0);  // 0 to 1
-      if (normalizedTemp <= 0.5) {
-        return "#4caf50";  // Green for lower normal
-      } else {
-        return "#ffa726";  // Orange for higher normal
-      }
-    }
-    return "#4caf50";  // Default green
-  };
-
-  const getStressColor = (value: number) => {
+  const getStressColor = (value: number): string => {
     if (value > 70) return "#ff5252";
     if (value > 40) return "#ffa726";
     return "#4caf50";
+  };
+
+  const getTempColor = (temp: number) => {
+    if (temp > 37.5) return "#ff5252"; // Red for high temperature
+    if (temp < 36.0) return "#2196f3"; // Blue for low temperature
+    if (temp >= 36.0 && temp <= 37.5) {
+      // Green to Yellow gradient for normal range
+      const normalizedTemp = (temp - 36.0) / (37.5 - 36.0); // 0 to 1
+      if (normalizedTemp <= 0.5) {
+        return "#4caf50"; // Green for lower normal
+      } else {
+        return "#ffa726"; // Orange for higher normal
+      }
+    }
+    return "#4caf50"; // Default green
+  };
+
+  const getHrvColor = (value: number): string => {
+    if (value < 30) return "#ff5252";
+    if (value > 150) return "#4caf50";
+        return "#ffa726";
   };
 
   const getHrvPercentage = (hrv: number) => {
@@ -224,26 +349,72 @@ const App: React.FC = () => {
     }
   };
 
-  const getAnalysisText = (metric: string) => {
-    switch (metric) {
-      case 'stress':
-        return {
-          title: 'Stress Analysis',
+  const getAnalysis = (): AnalysisData | null => {
+    if (selectedMetric === 'stress') {
+      const metrics: MetricAnalysis[] = [
+        {
+          title: 'Stress Level',
+          value: `${currentStress}%`,
           status: stressLevel,
-          details: currentStress > 70 
+          color: getStressColor(currentStress),
+          description: currentStress > 70 
             ? "Your stress level is high. Consider taking a break and practicing relaxation techniques."
             : currentStress > 40
             ? "Your stress level is moderate. Try some deep breathing exercises."
             : "Your stress level is normal. Keep up the good work!",
-          recommendation: currentStress > 40 
-            ? "• Practice deep breathing\n• Take a short walk\n• Listen to calming music\n• Try meditation"
-            : "• Maintain your current routine\n• Regular exercise\n• Good sleep habits",
-          exercises: {
-            title: "Recommended Exercises for Your Stress Level",
-            description: `Based on your current stress level (${currentStress}%), here are some targeted exercises:`,
-            list: getStressExercises(currentStress)
-          }
-        };
+          recommendations: currentStress > 40 
+            ? "• Practice deep breathing\n• Take a short walk\n• Listen to calming music\n• Try meditation\n• Progressive muscle relaxation\n• Guided imagery exercises\n• Yoga or gentle stretching\n• Mindful walking"
+            : "• Maintain your current routine\n• Regular exercise\n• Good sleep habits\n• Balanced diet\n• Social connections\n• Regular breaks\n• Hobby time\n• Nature exposure"
+        },
+        {
+          title: 'Body Temperature',
+          value: `${bodyTemperature.toFixed(1)}°C`,
+          status: bodyTemperature > 37.5 
+            ? "High"
+            : bodyTemperature < 36 
+            ? "Low" 
+            : "Normal",
+          color: bodyTemperature > 37.5 ? "#ff5252" : bodyTemperature < 36 ? "#ffa726" : "#4caf50",
+          description: bodyTemperature > 37.5
+            ? "Your body temperature is above normal range. Monitor for other symptoms."
+            : bodyTemperature < 36
+            ? "Your body temperature is below normal range. Try to warm up."
+            : "Your body temperature is within the normal range.",
+          recommendations: bodyTemperature > 37.5
+            ? "• Rest and hydrate\n• Monitor for other symptoms\n• Consult a doctor if persistent\n• Cool down exercises\n• Light stretching\n• Breathing exercises\n• Stay in shade\n• Wear light clothing"
+            : bodyTemperature < 36
+            ? "• Warm up gradually\n• Wear warm clothing\n• Have warm beverages\n• Gentle movement\n• Indoor exercises\n• Warm-up stretches\n• Layer clothing\n• Stay active"
+            : "• Maintain normal activities\n• Stay hydrated\n• Regular exercise\n• Balanced diet\n• Proper clothing\n• Regular breaks\n• Monitor temperature\n• Stay active"
+        },
+        {
+          title: 'Heart Rate Variability',
+          value: `${hrvValue}ms`,
+          status: hrvValue < 30 
+            ? "Low"
+            : hrvValue > 150 
+            ? "High" 
+            : "Normal",
+          color: getHrvColor(hrvValue),
+          description: hrvValue < 30
+            ? "Your HRV is low, which might indicate stress or fatigue. Consider taking time to rest and recover."
+            : hrvValue > 150
+            ? "Your HRV is high, indicating good cardiovascular fitness and stress resilience."
+            : "Your HRV is within a normal range, indicating good balance between stress and recovery.",
+          recommendations: hrvValue < 30
+            ? "• Prioritize rest and recovery\n• Practice stress management\n• Improve sleep quality\n• Consider reducing training intensity\n• Breathing exercises\n• Gentle yoga\n• Meditation\n• Progressive relaxation"
+            : hrvValue > 150
+            ? "• Maintain current lifestyle habits\n• Continue balanced exercise routine\n• Keep up good sleep patterns\n• Regular cardiovascular exercise\n• Strength training\n• Flexibility exercises\n• Balance training\n• Active recovery"
+            : "• Maintain regular exercise\n• Practice stress management\n• Ensure adequate sleep\n• Balanced activities\n• Regular breaks\n• Proper hydration\n• Healthy diet\n• Active lifestyle"
+        }
+      ];
+
+      return {
+        title: 'Comprehensive Health Analysis',
+        details: metrics
+      };
+    }
+
+    switch (selectedMetric) {
       case 'temperature':
         return {
           title: 'Body Temperature Analysis',
@@ -261,22 +432,7 @@ const App: React.FC = () => {
             ? "• Rest and hydrate\n• Monitor for other symptoms\n• Consult a doctor if persistent"
             : bodyTemperature < 36
             ? "• Warm up gradually\n• Wear warm clothing\n• Have warm beverages"
-            : "• Maintain normal activities\n• Stay hydrated",
-          tempInfo: {
-            title: "Temperature Information",
-            currentTemp: `Current Temperature: ${bodyTemperature.toFixed(1)}°C`,
-            normalRange: "Normal body temperature range: 36.0°C - 37.5°C",
-            interpretation: bodyTemperature > 37.5
-              ? "Elevated temperature may indicate fever or overexertion"
-              : bodyTemperature < 36
-              ? "Low temperature may indicate cold exposure or reduced circulation"
-              : "Your temperature is within healthy range",
-          },
-          exercises: {
-            title: "Recommended Activities for Your Temperature",
-            description: `Based on your current temperature (${bodyTemperature.toFixed(1)}°C), here are some suggested activities:`,
-            list: getTemperatureExercises(bodyTemperature)
-          }
+            : "• Maintain normal activities\n• Stay hydrated"
         };
       case 'hrv':
         return {
@@ -295,25 +451,19 @@ const App: React.FC = () => {
             ? "• Prioritize rest and recovery\n• Practice stress management\n• Improve sleep quality\n• Consider reducing training intensity"
             : hrvValue > 150
             ? "• Maintain current lifestyle habits\n• Continue balanced exercise routine\n• Keep up good sleep patterns"
-            : "• Maintain regular exercise\n• Practice stress management\n• Ensure adequate sleep",
-          hrvInfo: {
-            title: "Understanding Your HRV",
-            description: "Heart Rate Variability (HRV) measures the variation in time between heartbeats. Higher HRV generally indicates better cardiovascular fitness and stress resilience.",
-            currentValue: `Current HRV: ${hrvValue}ms`,
-            interpretation: hrvValue < 30
-              ? "Low HRV may indicate stress, poor recovery, or overtraining"
-              : hrvValue > 150
-              ? "High HRV suggests excellent cardiovascular health and stress resilience"
-              : "Your HRV indicates a good balance between stress and recovery"
-          }
+            : "• Maintain regular exercise\n• Practice stress management\n• Ensure adequate sleep"
         };
       default:
         return null;
     }
   };
 
-  const AnalysisModal = () => {
+  const renderAnalysisModal = () => {
     const analysis = getAnalysis();
+    if (!analysis) return null;
+
+    const isComprehensiveAnalysis = selectedMetric === 'stress' && Array.isArray(analysis.details);
+    const metrics = isComprehensiveAnalysis ? analysis.details as MetricAnalysis[] : [];
 
     return (
       <Modal
@@ -327,7 +477,7 @@ const App: React.FC = () => {
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>{analysis.title}</Text>
               <TouchableOpacity 
-                onPress={() => setSelectedMetric(null)}
+                onPress={() => setShowAnalysis(false)}
                 style={styles.closeButton}
               >
                 <FontAwesome6 name="xmark" size={24} color="#333" />
@@ -335,52 +485,43 @@ const App: React.FC = () => {
             </View>
 
             <ScrollView style={styles.analysisScrollView}>
-              <View style={styles.analysisContainer}>
-                <Text style={styles.statusText}>
-                  Status:{" "}
-                  <Text
-                    style={{ color: getStressColor(analysis.metrics.stress) }}
-                  >
-                    {analysis.status}
-                  </Text>
-                </Text>
-
-                <Text style={styles.detailsText}>{analysis.details}</Text>
-                
-                <Text style={styles.recommendationTitle}>General Recommendations:</Text>
-                <Text style={styles.recommendationText}>{analysis.recommendation}</Text>
-
-                {analysis.tempInfo && (
-                  <View style={styles.tempInfoSection}>
-                    <Text style={styles.tempInfoTitle}>{analysis.tempInfo.title}</Text>
-                    <Text style={[styles.tempInfoValue, { 
-                      color: getTempColor(bodyTemperature),
-                      fontSize: 24,
-                      fontWeight: 'bold',
-                      marginVertical: 10,
-                    }]}>{analysis.tempInfo.currentTemp}</Text>
-                    <Text style={styles.tempInfoRange}>{analysis.tempInfo.normalRange}</Text>
-                    <Text style={styles.tempInfoInterpretation}>{analysis.tempInfo.interpretation}</Text>
-                  </View>
-                )}
-
-                {analysis.exercises && (
-                  <View style={styles.exercisesSection}>
-                    <Text style={styles.exercisesTitle}>{analysis.exercises.title}</Text>
-                    <Text style={styles.exercisesDescription}>{analysis.exercises.description}</Text>
-                    <Text style={styles.exercisesList}>{analysis.exercises.list}</Text>
-                  </View>
+              {isComprehensiveAnalysis ? (
+                <View style={styles.comprehensiveAnalysisContainer}>
+                  {metrics.map((metric: MetricAnalysis, index: number) => (
+                    <View key={index} style={styles.metricAnalysisContainer}>
+                      <View style={styles.metricHeader}>
+                        <Text style={styles.metricTitle}>{metric.title}</Text>
+                        <Text style={[styles.metricValue, { color: metric.color }]}>
+                          {metric.value}
+                        </Text>
+                      </View>
+                      <Text style={styles.metricStatus}>
+                        Status: <Text style={{ color: metric.color }}>{metric.status}</Text>
+                      </Text>
+                      <Text style={styles.metricDescription}>{metric.description}</Text>
+                      <Text style={styles.recommendationTitle}>Recommended Activities:</Text>
+                      <Text style={styles.recommendationText}>{metric.recommendations}</Text>
+                      {index < metrics.length - 1 && (
+                        <View style={styles.metricSeparator} />
+                      )}
+                    </View>
+                  ))}
                 </View>
-
-                {analysis.hrvInfo && (
-                  <View style={styles.hrvInfoSection}>
-                    <Text style={styles.hrvInfoTitle}>{analysis.hrvInfo.title}</Text>
-                    <Text style={styles.hrvInfoDescription}>{analysis.hrvInfo.description}</Text>
-                    <Text style={styles.hrvInfoCurrentValue}>{analysis.hrvInfo.currentValue}</Text>
-                    <Text style={styles.hrvInfoInterpretation}>{analysis.hrvInfo.interpretation}</Text>
-                  </View>
-                ))}
-              </View>
+              ) : (
+                <View style={styles.analysisContainer}>
+                  <Text style={styles.statusText}>
+                    Status:{" "}
+                    <Text style={{ color: getStressColor(currentStress) }}>
+                      {analysis.status}
+                    </Text>
+                  </Text>
+                  <Text style={styles.detailsText}>
+                    {typeof analysis.details === 'string' ? analysis.details : ''}
+                  </Text>
+                  <Text style={styles.recommendationTitle}>Recommended Activities:</Text>
+                  <Text style={styles.recommendationText}>{analysis.recommendation}</Text>
+                </View>
+              )}
             </ScrollView>
           </View>
         </View>
@@ -425,18 +566,50 @@ const App: React.FC = () => {
     </Modal>
   );
 
-  if (!isStarted) return <StartScreen onStart={() => setIsStarted(true)} />;
+  // Add history view to the dashboard
+  const renderHistory = () => (
+    <View style={styles.historyContainer}>
+      <Text style={styles.historyTitle}>Recent Measurements</Text>
+      {history.length === 0 ? (
+        <View style={styles.emptyHistoryContainer}>
+          <FontAwesome6 name="history" size={40} color="#ccc" style={styles.emptyHistoryIcon} />
+          <Text style={styles.emptyHistoryText}>No measurements recorded yet</Text>
+        </View>
+      ) : (
+        <ScrollView style={styles.historyScrollView}>
+          {history.slice().reverse().map((entry, index) => (
+            <View key={index} style={styles.historyEntry}>
+              <Text style={styles.historyName}>{entry.name}</Text>
+              <Text style={styles.historyTime}>{entry.timestamp}</Text>
+              <Text style={[styles.historyStress, { color: getStressColor(entry.stressLevel) }]}>
+                Stress: {entry.stressLevel}%
+              </Text>
+            </View>
+          ))}
+        </ScrollView>
+      )}
+    </View>
+  );
+
+  if (!isStarted) {
+    return <UserInputScreen onStart={handleStartMonitoring} />;
+  }
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.title}>CalmPulse - Stress Tracker</Text>
+      <Text style={styles.title}>CalmPulse-Smart Stress Tracker and Guide</Text>
 
       <View style={styles.buttonContainer}>
         <Button
-          title={isConnected ? "Connected" : "Connect to Device"}
+          title={isConnected ? "Connected to ESP32" : "Connect to ESP32"}
           onPress={connectToDevice}
-          color="#4caf50"
         />
+        <TouchableOpacity
+          style={styles.relaxButton}
+          onPress={openRelaxationHub}
+        >
+          <Text style={styles.relaxText}>Relaxation Hub</Text>
+        </TouchableOpacity>
       </View>
 
       <View style={styles.dashboard}>
@@ -463,15 +636,19 @@ const App: React.FC = () => {
           </TouchableOpacity>
         </View>
 
-        <TouchableOpacity 
-          onPress={() => setSelectedMetric('stress')}
-          style={styles.progressContainer}
-        >
+        <View style={styles.metricsContainer}>
+          <TouchableOpacity 
+            style={styles.mainMetric}
+            onPress={() => {
+              setSelectedMetric('stress');
+              setShowAnalysis(true);
+            }}
+          >
           <AnimatedCircularProgress
             size={200}
             width={20}
             fill={currentStress}
-            tintColor={getStressColor(currentStress)}
+              tintColor={getStressColor(currentStress)}
             backgroundColor="#e0e0e0"
             rotation={0}
             lineCap="round"
@@ -483,395 +660,91 @@ const App: React.FC = () => {
               </View>
             )}
           </AnimatedCircularProgress>
-        </TouchableOpacity>
+          </TouchableOpacity>
 
-        <View style={styles.metricsContainer}>
-          <TouchableOpacity 
-            style={styles.metricItem}
-            onPress={() => setSelectedMetric('temperature')}
-          >
-            <AnimatedCircularProgress
-              size={100}
-              width={10}
-              fill={((bodyTemperature - 35) / (40 - 35)) * 100}
-              tintColor="#4caf50"
-              backgroundColor="#e0e0e0"
-              rotation={0}
-              lineCap="round"
-            >
-              {(fill) => (
-                <View style={styles.smallProgressContent}>
-                  <Text style={[
-                    styles.smallPercentText,
-                    {
-                      fontSize: bodyTemperature > 37.5 ? 24 :
-                               bodyTemperature < 36.0 ? 14 : 18,
-                      fontWeight: 'bold',
-                    }
-                  ]}>{`${bodyTemperature.toFixed(1)}°C`}</Text>
-                  <FontAwesome6 
-                    name="temperature-three-quarters" 
-                    size={24} 
-                    color="#4caf50"
-                    style={styles.iconStyle}
-                  />
-                </View>
-              )}
-            </AnimatedCircularProgress>
+          <View style={styles.sideMetricsContainer}>
+            <View style={styles.sideMetric}>
+              <AnimatedCircularProgress
+                size={100}
+                width={10}
+                fill={((bodyTemperature - 35) / (40 - 35)) * 100}
+                tintColor={getTempColor(bodyTemperature)}
+                backgroundColor="#e0e0e0"
+                rotation={0}
+                lineCap="round"
+              >
+                {(fill) => (
+                  <View style={styles.smallProgressContent}>
+                    <Text style={[
+                      styles.smallPercentText,
+                      {
+                        fontSize: bodyTemperature > 37.5 ? 24 :
+                                 bodyTemperature < 36.0 ? 14 : 18,
+                        fontWeight: 'bold',
+                      }
+                    ]}>{`${bodyTemperature.toFixed(1)}°C`}</Text>
+                    <FontAwesome6 
+                      name="temperature-three-quarters" 
+                      size={24} 
+                      color={getTempColor(bodyTemperature)}
+                      style={styles.iconStyle}
+                    />
+                  </View>
+                )}
+              </AnimatedCircularProgress>
+            </View>
+
+            <View style={styles.sideMetric}>
+              <AnimatedCircularProgress
+                size={100}
+                width={10}
+                fill={getHrvPercentage(hrvValue)}
+                tintColor={getHrvColor(hrvValue)}
+                backgroundColor="#e0e0e0"
+                rotation={0}
+                lineCap="round"
+              >
+                {(fill) => (
+                  <View style={styles.smallProgressContent}>
+                    <Text style={styles.smallPercentText}>{`${hrvValue}ms`}</Text>
+                    <FontAwesome6 
+                      name="heart-pulse" 
+                      size={24} 
+                      color={getHrvColor(hrvValue)}
+                      style={styles.iconStyle}
+                    />
+                  </View>
+                )}
+              </AnimatedCircularProgress>
+            </View>
           </View>
 
-          <TouchableOpacity 
-            style={styles.metricItem}
-            onPress={() => setSelectedMetric('hrv')}
-          >
-            <AnimatedCircularProgress
-              size={100}
-              width={10}
-              fill={((hrvValue - 20) / (200 - 20)) * 100}
-              tintColor="#4caf50"
-              backgroundColor="#e0e0e0"
-              rotation={0}
-              lineCap="round"
-            >
-              {(fill) => (
-                <View style={styles.smallProgressContent}>
-                  <Text style={styles.smallPercentText}>{`${hrvValue}ms`}</Text>
-                  <FontAwesome6 
-                    name="heart-pulse" 
-                    size={24} 
-                    color={getHrvColor(hrvValue)} 
-                    style={styles.iconStyle}
-                  />
-                </View>
-              )}
-            </AnimatedCircularProgress>
+          <View style={styles.noteContainer}>
+            <FontAwesome6 
+              name="circle-info" 
+              size={16} 
+              color="#666" 
+              style={styles.noteIcon}
+            />
+            <Text style={styles.noteText}>
+              Note: Please take 10 minutes rest if you have been through an exercise such as walking for accurate measurements.
+            </Text>
           </View>
         </View>
       </View>
 
+      <TouchableOpacity
+        style={styles.relaxButton}
+        onPress={() => setShowHistory(!showHistory)}
+      >
+        <Text style={styles.relaxText}>Recent Measurements</Text>
+      </TouchableOpacity>
+
+      {showHistory && renderHistory()}
       {renderAnalysisModal()}
+      {renderIPInputModal()}
     </ScrollView>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    flexGrow: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 20,
-    backgroundColor: "#f5f5f5",
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: "bold",
-    color: "#333",
-    marginBottom: 20,
-    textAlign: "center",
-  },
-  buttonContainer: {
-    marginVertical: 20,
-    width: "100%",
-    paddingHorizontal: 20,
-  },
-  dashboard: {
-    width: "100%",
-    padding: 20,
-    borderRadius: 20,
-    backgroundColor: "#fff",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    elevation: 3,
-    marginBottom: 20,
-    alignItems: "center",
-  },
-  progressContainer: {
-    alignItems: "center",
-    justifyContent: "center",
-    marginVertical: 20,
-  },
-  progressContent: {
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  percentText: {
-    fontSize: 36,
-    fontWeight: "bold",
-    color: "#333",
-  },
-  stressLabel: {
-    fontSize: 14,
-    color: "#666",
-    marginTop: 5,
-  },
-  metricsContainer: {
-    flexDirection: "row",
-    justifyContent: "space-around",
-    width: "100%",
-    marginTop: 20,
-  },
-  metricItem: {
-    alignItems: "center",
-  },
-  smallProgressContent: {
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  smallPercentText: {
-    fontWeight: "bold",
-    color: "#333",
-    textAlign: 'center',
-  },
-  smallLabel: {
-    fontSize: 12,
-    color: "#666",
-    marginTop: 2,
-  },
-  symbolText: {
-    fontSize: 20,
-    marginTop: 2,
-  },
-  iconStyle: {
-    marginTop: 8,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0, 0, 0, 0.5)",
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 20,
-  },
-  modalContent: {
-    backgroundColor: "white",
-    borderRadius: 20,
-    padding: 20,
-    width: "90%",
-    maxHeight: "80%",
-  },
-  modalHeader: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 20,
-  },
-  modalTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  closeButton: {
-    padding: 5,
-  },
-  analysisContainer: {
-    marginTop: 10,
-  },
-  statusText: {
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#333",
-    marginBottom: 15,
-  },
-  detailsText: {
-    fontSize: 16,
-    color: "#666",
-    marginBottom: 20,
-    lineHeight: 24,
-  },
-  recommendationTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 10,
-  },
-  recommendationText: {
-    fontSize: 16,
-    color: '#666',
-    lineHeight: 24,
-  },
-  analysisScrollView: {
-    maxHeight: '80%',
-  },
-  exercisesSection: {
-    marginTop: 20,
-    padding: 15,
-    backgroundColor: '#f8f9fa',
-    borderRadius: 10,
-  },
-  exercisesTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 10,
-  },
-  exercisesDescription: {
-    fontSize: 16,
-    color: '#666',
-    marginBottom: 15,
-  },
-  exercisesList: {
-    fontSize: 16,
-    color: '#444',
-    lineHeight: 24,
-  },
-  hrvInfoSection: {
-    marginTop: 20,
-    padding: 15,
-    backgroundColor: '#f8f9fa',
-    borderRadius: 10,
-  },
-  hrvInfoTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 10,
-  },
-  hrvInfoDescription: {
-    fontSize: 16,
-    color: '#666',
-    marginBottom: 15,
-  },
-  hrvInfoCurrentValue: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 10,
-  },
-  hrvInfoInterpretation: {
-    fontSize: 16,
-    color: '#666',
-    lineHeight: 24,
-  },
-  startContainer: {
-    flex: 1,
-    backgroundColor: "#f5f5f5",
-    justifyContent: "center",
-    alignItems: "center",
-    padding: 20,
-  },
-  startContent: {
-    width: "100%",
-    maxWidth: 400,
-    alignItems: "center",
-    backgroundColor: "#ffffff",
-    borderRadius: 20,
-    padding: 30,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    elevation: 5,
-  },
-  startTitle: {
-    fontSize: 32,
-    fontWeight: "bold",
-    color: "#333",
-    textAlign: "center",
-    marginBottom: 10,
-  },
-  startSubtitle: {
-    fontSize: 18,
-    color: "#666",
-    textAlign: "center",
-    marginBottom: 30,
-  },
-  iconContainer: {
-    width: 120,
-    height: 120,
-    backgroundColor: "#f8f9fa",
-    borderRadius: 60,
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: 30,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    elevation: 3,
-  },
-  startIcon: {
-    marginBottom: 5,
-  },
-  startDescription: {
-    fontSize: 16,
-    color: "#666",
-    textAlign: "center",
-    lineHeight: 24,
-    marginBottom: 40,
-    paddingHorizontal: 20,
-  },
-  startButton: {
-    flexDirection: "row",
-    backgroundColor: "#4caf50",
-    paddingVertical: 15,
-    paddingHorizontal: 30,
-    borderRadius: 30,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    elevation: 3,
-  },
-  startButtonText: {
-    color: "#fff",
-    fontSize: 18,
-    fontWeight: "bold",
-    marginRight: 10,
-  },
-  arrowIcon: {
-    marginLeft: 5,
-  },
-  tempInfoSection: {
-    marginTop: 20,
-    padding: 15,
-    backgroundColor: '#f8f9fa',
-    borderRadius: 10,
-  },
-  tempInfoTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 10,
-  },
-  tempInfoValue: {
-    textAlign: 'center',
-  },
-  tempInfoRange: {
-    fontSize: 16,
-    color: '#666',
-    marginBottom: 10,
-  },
-  tempInfoInterpretation: {
-    fontSize: 16,
-    color: '#666',
-    lineHeight: 24,
-  },
-  monitoringControls: {
-    width: "100%",
-    alignItems: "center",
-    marginBottom: 15,
-  },
-  monitoringButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: 10,
-    paddingHorizontal: 20,
-    borderRadius: 25,
-    backgroundColor: '#4caf50',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    elevation: 2,
-  },
-  monitoringButtonText: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "bold",
-    marginLeft: 8,
-  },
-  monitoringIcon: {
-    marginRight: 5,
-  },
-});
 
 export default App;
